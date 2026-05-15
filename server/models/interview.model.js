@@ -43,7 +43,10 @@ const interviewSchema = new mongoose.Schema({
             enum: ["HR", "Technical"],
             required: true
       },
-      reusmeText: {
+      resumeText: {
+            type: String
+      },
+      userName: {
             type: String
       },
       questions: [questionSchema],

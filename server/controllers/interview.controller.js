@@ -100,7 +100,7 @@ Output format:
 
 export const generateQuestions = async (req, res) => {
   try {
-    let { role, experience, mode, resumeText, projects, skills } = req.body;
+    let { role, experience, mode, resumeText, projects, skills, userName } = req.body;
 
     role = role?.trim();
     experience = experience?.trim();
@@ -221,6 +221,7 @@ Focus on realistic interview situations instead of textbook theory questions.
       experience,
       mode,
       resumeText: safeResume,
+      userName: userName || user.name,
       questions: questionsArray.map((q, index) => ({
         question: q,
         difficulty: ["easy", "easy", "medium", "medium", "hard"][index],
@@ -231,7 +232,7 @@ Focus on realistic interview situations instead of textbook theory questions.
     res.json({
       interviewId: interview._id,
       creditsLeft: user.credits,
-      userName: user.name,
+      userName: interview.userName,
       questions: interview.questions,
     });
   } catch (error) {

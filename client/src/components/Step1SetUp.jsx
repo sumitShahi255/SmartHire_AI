@@ -41,6 +41,7 @@ function Step1SetUp({onStart}) {
       setProjects(result.data.projects || []);
       setSkills(result.data.skills || []);
       setResumeText(result.data.resumeText || "");
+      if (result.data.name) setName(result.data.name);
       setAnalysisDone(true);
       setAnalyzing(false);
 
@@ -53,7 +54,7 @@ function Step1SetUp({onStart}) {
     setLoading(true)
     try {
       const result = await axios.post(ServerUrl + "/api/interview/generate-questions",{role, experience, mode,
-        resumeText, projects, skills },{withCredentials:true});
+        resumeText, projects, skills, userName: name },{withCredentials:true});
       console.log(result.data);
 
       if(userData){
@@ -143,9 +144,17 @@ function Step1SetUp({onStart}) {
           </p>
 
           <div className='space-y-6'>
-
             <div className='relative'>
               <UserRound className='absolute top-1/2 -translate-y-1/2 left-4 text-gray-400 text-lg'/>
+
+              <input type = "text" placeholder='Candidate Name (e.g. John Doe)'
+              className='w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 
+              focus:ring-green-500 outline-none transition'
+              onChange={(e) => setName(e.target.value)} value={name}/>
+            </div>
+
+            <div className='relative'>
+              <BriefcaseBusiness className='absolute top-1/2 -translate-y-1/2 left-4 text-gray-400 text-lg'/>
 
               <input type = "text" placeholder='Target Role (e.g. Frontend Developer)'
               className='w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 
@@ -154,7 +163,7 @@ function Step1SetUp({onStart}) {
             </div>
 
             <div className='relative'>
-              <BriefcaseBusiness className='absolute top-1/2 -translate-y-1/2 left-4 text-gray-400 text-lg'/>
+              <TrendingUp className='absolute top-1/2 -translate-y-1/2 left-4 text-gray-400 text-lg'/>
 
               <input type = "text" placeholder='Years of Experience (e.g. 2+ years)'
               className='w-full pl-12 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 

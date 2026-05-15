@@ -12,6 +12,7 @@ import { ServerUrl } from '../App';
 import * as faceapi from '@vladmandic/face-api';
 import * as tf from '@tensorflow/tfjs';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import { useCallback } from 'react';
 import { Camera, ShieldAlert, Video as VideoIcon, Download, Smartphone } from 'lucide-react';
 
 
@@ -45,7 +46,7 @@ function Step2Interview({interviewData, onFinish}) {
   const streamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
-  const analysisIntervalRef = useRef(null);
+  const analysisTimeoutRef = useRef(null);
   
   const [isRecording, setIsRecording] = useState(false);
   const [emotion, setEmotion] = useState("Neutral");
@@ -148,7 +149,8 @@ function Step2Interview({interviewData, onFinish}) {
 
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
-
+    // Preload voices
+    window.speechSynthesis.getVoices();
   },[])
 
   useEffect(() => {
@@ -197,12 +199,15 @@ function Step2Interview({interviewData, onFinish}) {
             height: 480,
             frameRate: 24
           },
-          audio: false 
+          audio: true 
         });
         streamRef.current = stream;
         
         if (hasStarted && userVideoRef.current) {
           userVideoRef.current.srcObject = stream;
+          userVideoRef.current.onloadedmetadata = () => {
+            userVideoRef.current.play();
+          };
           if (!isRecording) startRecording(stream);
         }
       } catch (err) {
@@ -217,7 +222,7 @@ function Step2Interview({interviewData, onFinish}) {
         stream.getTracks().forEach(track => track.stop());
       }
       stopRecording();
-      if (analysisIntervalRef.current) clearInterval(analysisIntervalRef.current);
+      if (analysisTimeoutRef.current) clearTimeout(analysisTimeoutRef.current);
     };
   }, [hasStarted]); 
 
@@ -332,98 +337,101 @@ function Step2Interview({interviewData, onFinish}) {
   };
 
   useEffect(() => {
-    console.log("AI Effect Check:", { isModelsLoaded, hasUserVideo: !!userVideoRef.current, hasStarted });
-    if (isModelsLoaded && userVideoRef.current && hasStarted) {
-      console.log("Starting AI Analysis Interval with delay...");
-      const aiTimeout = setTimeout(() => {
-        analysisIntervalRef.current = setInterval(async () => {
-        if (!userVideoRef.current || userVideoRef.current.readyState !== 4) {
-          console.log("Video not ready or null", userVideoRef.current?.readyState);
-          return;
-        }
+    if (!isModelsLoaded || !hasStarted) return;
 
-        try {
+    const runAnalysis = async () => {
+      if (!isMountedRef.current || !hasStarted) return;
+
+      if (!userVideoRef.current || userVideoRef.current.readyState !== 4) {
+        analysisTimeoutRef.current = setTimeout(runAnalysis, 1000);
+        return;
+      }
+
+      try {
+        //  Face & Multi-Person Detection 
+        const detections = await faceapi.detectAllFaces(
+          userVideoRef.current,
+          new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 })
+        ).withFaceLandmarks();
+
+        let currentStatus = "";
+
+        if (detections.length > 1) {
+          violationCounterRef.current.multiplePeople++;
+          violationCounterRef.current.faceOut = 0;
+          currentStatus = "Multiple faces detected. Please ensure only you are in the frame.";
           
-          const detections = await faceapi.detectAllFaces(
-            userVideoRef.current,
-            new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 })
-          ).withFaceLandmarks();
-
-          console.log("AI Detections Count:", detections.length);
-
-          if (detections.length > 1) {
-            violationCounterRef.current.multiplePeople++;
-            violationCounterRef.current.faceOut = 0; 
-            if (statusAlertRef.current !== "Multiple faces detected. Please ensure only you are in the frame.") {
-              statusAlertRef.current = "Multiple faces detected. Please ensure only you are in the frame.";
-              setStatusAlert("Multiple faces detected. Please ensure only you are in the frame.");
-            }
-            if (violationCounterRef.current.multiplePeople >= 3) {
-              handleCheatingRef.current?.("Multiple people");
-              violationCounterRef.current.multiplePeople = 0;
-            }
-          } else if (detections.length === 0) {
-            violationCounterRef.current.faceOut++;
-
-            
-            if (violationCounterRef.current.faceOut >= 3) {
-              if (statusAlertRef.current !== "Face not detected. Please stay in the camera frame.") {
-                statusAlertRef.current = "Face not detected. Please stay in the camera frame.";
-                setStatusAlert("Face not detected. Please stay in the camera frame.");
-              }
-              if (isFaceDetected) setIsFaceDetected(false);
-            }
-
-            if (violationCounterRef.current.faceOut >= 20) {
-              setCheatingAlert("Interview ended due to prolonged face absence.");
-              setTimeout(() => finishInterview(true), 2000);
-              if (analysisIntervalRef.current) clearInterval(analysisIntervalRef.current);
-            }
-          } else {
-            
-            if (!isFaceDetected) setIsFaceDetected(true);
-            violationCounterRef.current.faceOut = 0;
+          if (violationCounterRef.current.multiplePeople >= 3) {
+            handleCheatingRef.current?.("Multiple people");
             violationCounterRef.current.multiplePeople = 0;
-
-            
-            if (statusAlertRef.current !== "") {
-              statusAlertRef.current = "";
-              setStatusAlert("");
-            }
+          }
+        } else if (detections.length === 0) {
+          violationCounterRef.current.faceOut++;
+          if (violationCounterRef.current.faceOut >= 3) {
+            currentStatus = "Face not detected. Please stay in the camera frame.";
+            if (isFaceDetected) setIsFaceDetected(false);
           }
 
-          //  Phone Detection 
-          if (objectModelRef.current) {
-            const predictions = await objectModelRef.current.detect(userVideoRef.current);
-            const phoneDetected = predictions.some(p => p.class === 'cell phone' && p.score > 0.6);
+          if (violationCounterRef.current.faceOut >= 20) {
+            setCheatingAlert("Interview ended due to prolonged face absence.");
+            setTimeout(() => finishInterview(true), 2000);
+            return; // Stop the loop
+          }
+        } else {
+          if (!isFaceDetected) setIsFaceDetected(true);
+          violationCounterRef.current.faceOut = 0;
+          violationCounterRef.current.multiplePeople = 0;
+        }
 
-            if (phoneDetected) {
-              violationCounterRef.current.phone++;
-              if (statusAlertRef.current !== "Phone detected! Mobile devices are strictly prohibited.") {
-                statusAlertRef.current = "Phone detected! Mobile devices are strictly prohibited.";
-                setStatusAlert("Phone detected! Mobile devices are strictly prohibited.");
-              }
-              if (violationCounterRef.current.phone >= 2) {
-                handleCheatingRef.current?.("Phone detection");
-                violationCounterRef.current.phone = 0;
-              }
-            } else {
+        //  Phone Detection 
+        if (objectModelRef.current) {
+          const predictions = await objectModelRef.current.detect(userVideoRef.current);
+          
+          // Log predictions for debugging (visible in browser console)
+          if (predictions.length > 0) {
+            console.log("AI Object Predictions:", predictions);
+          }
+
+          const phoneDetected = predictions.some(p => 
+            (p.class === 'cell phone' || p.class === 'mobile phone' || p.class === 'phone' || p.class === 'remote') && 
+            p.score > 0.25
+          );
+
+          if (phoneDetected) {
+            violationCounterRef.current.phone++;
+            currentStatus = "Phone detected! Mobile devices are strictly prohibited.";
+            
+            if (violationCounterRef.current.phone >= 2) {
+              handleCheatingRef.current?.("Phone detection");
               violationCounterRef.current.phone = 0;
             }
+          } else {
+            violationCounterRef.current.phone = 0;
           }
-
-        } catch (err) {
-          console.error("AI Analysis Error:", err);
         }
-      }, 1500);
-      }, 2000); 
 
-    }
+        // Update Status Alert
+        if (statusAlertRef.current !== currentStatus) {
+          statusAlertRef.current = currentStatus;
+          setStatusAlert(currentStatus);
+        }
+
+      } catch (err) {
+        console.error("AI Analysis Error:", err);
+      }
+
+      if (isModelsLoaded && hasStarted) {
+        analysisTimeoutRef.current = setTimeout(runAnalysis, 1500);
+      }
+    };
+
+    const initialTimeout = setTimeout(runAnalysis, 2000);
+    analysisTimeoutRef.current = initialTimeout;
 
     return () => {
-      if (analysisIntervalRef.current) clearInterval(analysisIntervalRef.current);
+      if (analysisTimeoutRef.current) clearTimeout(analysisTimeoutRef.current);
     };
-  }, [isModelsLoaded, hasStarted]);
+  }, [isModelsLoaded, hasStarted, isIntroPhase]);
   const startRecording = (stream) => {
     const mediaRecorder = new MediaRecorder(stream);
     mediaRecorderRef.current = mediaRecorder;
@@ -518,7 +526,7 @@ function Step2Interview({interviewData, onFinish}) {
 
   // speak function
 
-  const speakText = (text) => {
+  const speakText = useCallback((text) => {
     return new Promise((resolve) => {
       if(!window.speechSynthesis || !selectedVoice || !isMountedRef.current){
         resolve();
@@ -532,10 +540,10 @@ function Step2Interview({interviewData, onFinish}) {
       .replace(/ but /gi, ", but ")
       .replace(/ because /gi, ", because ")
       .replace(/ so /gi, ", so ")
-      .replace(/,/g, ", ..... ")
-      .replace(/\./g, ". ...... ")
-      .replace(/\?/g, "? ...... ")
-      .replace(/!/g, "! ...... ");
+      .replace(/,/g, ", .. ")
+      .replace(/\./g, ". ... ")
+      .replace(/\?/g, "? ... ")
+      .replace(/!/g, "! ... ");
 
       const utterance = new SpeechSynthesisUtterance(humanText);
       utterance.voice = selectedVoice;
@@ -589,8 +597,8 @@ function Step2Interview({interviewData, onFinish}) {
       setSubtitle(text);
 
       window.speechSynthesis.speak(utterance);
-    })
-  }
+    });
+  }, [selectedVoice, isAIPlaying, hasStarted, isMountedRef.current]);
 
   useEffect(() => {
     if(!selectedVoice || !hasStarted){
@@ -598,7 +606,7 @@ function Step2Interview({interviewData, onFinish}) {
     }
 
     const runIntro = async() => {
-      await new Promise(resolve => setTimeout(resolve, 1200));
+      await new Promise(resolve => setTimeout(resolve, 1500));
       
       if(isIntroPhase){
 
@@ -824,7 +832,7 @@ function Step2Interview({interviewData, onFinish}) {
         recognitionRef.current.abort();
       }
       window.speechSynthesis.cancel();
-      if (analysisIntervalRef.current) clearInterval(analysisIntervalRef.current);
+      if (analysisTimeoutRef.current) clearTimeout(analysisTimeoutRef.current);
       stopCamera();
       stopRecording();
     }
