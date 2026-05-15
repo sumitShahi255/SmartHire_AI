@@ -1,0 +1,21 @@
+# dependencies
+node_modules
+
+# environment variables
+.env
+
+# logs
+logs
+*.log
+
+# build files
+dist
+build
+
+# uploads/temp
+uploads/
+temp/
+
+# editor files
+.vscode/
+.idea/
