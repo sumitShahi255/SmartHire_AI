@@ -235,6 +235,7 @@ The platform includes strict interview monitoring features to simulate real inte
 * Copy, cut, and paste actions disabled during interviews
 * Keyboard shortcut restrictions during interview sessions
 * Real-time face detection monitoring
+* Phone Detection
 * Interview warnings for suspicious activities
 * AI interview session tracking
 
