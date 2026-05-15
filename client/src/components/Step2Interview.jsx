@@ -387,7 +387,6 @@ function Step2Interview({interviewData, onFinish}) {
         if (objectModelRef.current) {
           const predictions = await objectModelRef.current.detect(userVideoRef.current);
           
-          // Log predictions for debugging (visible in browser console)
           if (predictions.length > 0) {
             console.log("AI Object Predictions:", predictions);
           }
